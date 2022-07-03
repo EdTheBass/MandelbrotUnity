@@ -1,0 +1,90 @@
+﻿// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+RWTexture2D<float4> Result;
+
+float ResolutionX;
+float ResolutionY;
+float xOffset;
+float yOffset;
+float scroll;
+float Iterations;
+float2 z;
+float2 RValue;
+float RReal;
+float RImag;
+bool Julia;
+float ColourCount;
+RWBuffer<float> rColours;
+RWBuffer<float> gColours;
+RWBuffer<float> bColours;
+
+float _map(in float val, in float r1, in float r2, in float nr1, in float nr2) {
+    return float(((val-r1)/(r2-r1)) * (nr2-nr1) + nr1);
+}
+
+float2 next_z(in float2 zn, in float2 c) {
+    float2 z_next;
+    
+    if (Julia) { 
+        z_next = float2( (zn[0]*zn[0]) - (zn[1]*zn[1]) + c[0], 2.0f * zn[0] * zn[1] + c[1] );
+    } else {
+        z_next = float2( (c[0]*c[0]) - (c[1]*c[1]) + zn[0], 2.0f * c[0] * c[1] + zn[1] );
+    }
+    return z_next;
+}
+
+float4 weird_colour_shit(in float2 zn, in uint count) {
+    float smoothed = log2 ( log2 ( zn[0]*zn[0] + zn[1]*zn[1] ) / 2 );
+    uint colourI = uint(sqrt(count + 10 - smoothed) * 256) % ColourCount;
+    float4 colour = float4(rColours[colourI], gColours[colourI], bColours[colourI], 1.0);
+    return colour;
+}
+
+float4 calc_colour(in float2 _point, in uint iterations) {
+    if ((pow(_point[0],2.0f) + pow(_point[1],2.0f)) > 4.0f) {
+        return float4(1, 1, 1, 1);
+    }
+    
+    if (Julia) {
+        z = _point;
+    } else {
+        z = float2(0.0f,0.0f);
+    }
+    uint z_count = 0;
+    for (uint x=0;x<iterations;x++) {
+        if (Julia) {
+            z = next_z(z, RValue);
+        } else {
+            z = next_z(_point, z);
+        }
+        z_count++;
+        
+        if (pow(z[0],2.0f) + pow(z[1],2.0f) > 4.0f) {
+            return weird_colour_shit(z, z_count);
+        }
+    }
+
+    return float4(0,0,0,1);
+}
+
+
+
+[numthreads(8,8,1)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+    float xScale = ResolutionX / ResolutionY;
+
+    float xScrollA = -scroll * xScale + xOffset;
+    float xScrollB = scroll * xScale + xOffset;
+    float yScrollA = -scroll + yOffset;
+    float yScrollB = scroll + yOffset;
+
+    RValue = float2(RReal, RImag);
+    float mappedX = _map(id.x, 1.0, ResolutionX, xScrollA, xScrollB);
+    float mappedY = _map(id.y, 1.0, ResolutionY, yScrollA, yScrollB);
+
+    Result[id.xy] = calc_colour(float2(mappedX, mappedY), Iterations);
+}
